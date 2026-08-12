@@ -266,3 +266,119 @@ def test_round_error_continues_fatal_fails(tmp_path: Path):
         assert False, "expected FatalError"
     except FatalError:
         assert store2.load(rec2.run_id).status == RunStatus.failed
+
+
+def test_pause_after_round_error(tmp_path: Path):
+    cfg = load_config(None)
+    cfg.trainer.backend = "fake"
+    cfg.budgets.max_rounds = 3
+    cfg.runs_dir = tmp_path / "runs"
+    inp = tmp_path / "in"
+    inp.mkdir()
+    (inp / "brief.md").write_text("ACME billing", encoding="utf-8")
+
+    store = RunStore(cfg.runs_dir)
+    rec = store.create(input_dir=inp)
+
+    plan_n = {"n": 0}
+
+    def plan(s: str, u: str) -> dict:
+        plan_n["n"] += 1
+        store.request_pause(rec.run_id)
+        raise RoundError("plan failed mid-flight")
+
+    llm = FakeLLMClient(
+        handlers={
+            "recommend_model": lambda s, u: {
+                "model_id": "Qwen/Qwen2.5-7B-Instruct",
+                "rationale": "default",
+            },
+            "round_plan": plan,
+            "synthesize_qa": _synth_payload,
+            "judge_qa": _judge_payload,
+            "decide": lambda s, u: {
+                "action": "continue",
+                "hypothesis": "",
+                "reason": "should not reach",
+            },
+        }
+    )
+
+    final = run_experiment(
+        cfg,
+        store,
+        rec.run_id,
+        llm,
+        FakeTrainer(),
+        base_model_arg="auto",
+        predict_fn_factory=lambda **kwargs: (lambda q: "A0"),
+    )
+    assert final.status == RunStatus.paused
+    assert final.current_round == 1
+    assert final.pause_requested is False
+    assert final.last_error == "plan failed mid-flight"
+    assert plan_n["n"] == 1
+    assert not (store.round_dir(rec.run_id, 2) / "plan.json").exists()
+
+
+def test_plan_includes_prior_round_context(tmp_path: Path):
+    cfg = load_config(None)
+    cfg.trainer.backend = "fake"
+    cfg.budgets.max_rounds = 2
+    cfg.runs_dir = tmp_path / "runs"
+    inp = tmp_path / "in"
+    inp.mkdir()
+    (inp / "brief.md").write_text("ACME billing", encoding="utf-8")
+
+    store = RunStore(cfg.runs_dir)
+    rec = store.create(input_dir=inp)
+
+    plan_users: list[dict] = []
+    decide_n = {"n": 0}
+
+    def plan(s: str, u: str) -> dict:
+        plan_users.append(json.loads(u))
+        return _plan_payload(s, u)
+
+    def decide(s: str, u: str) -> dict:
+        decide_n["n"] += 1
+        if decide_n["n"] == 1:
+            return {
+                "action": "continue",
+                "hypothesis": "try harder facts",
+                "reason": "need another round",
+            }
+        return {"action": "stop", "hypothesis": "", "reason": "done"}
+
+    llm = FakeLLMClient(
+        handlers={
+            "recommend_model": lambda s, u: {
+                "model_id": "Qwen/Qwen2.5-7B-Instruct",
+                "rationale": "default",
+            },
+            "round_plan": plan,
+            "synthesize_qa": _synth_payload,
+            "judge_qa": _judge_payload,
+            "decide": decide,
+        }
+    )
+
+    final = run_experiment(
+        cfg,
+        store,
+        rec.run_id,
+        llm,
+        FakeTrainer(),
+        base_model_arg="auto",
+        predict_fn_factory=lambda **kwargs: (lambda q: "A0"),
+    )
+    assert final.status == RunStatus.completed
+    assert len(plan_users) == 2
+    assert "prior" not in plan_users[0]
+    prior = plan_users[1]["prior"]
+    assert prior["prior_round"] == 1
+    assert "metrics" in prior
+    assert "judge_score" in prior["metrics"]
+    assert "report" in prior
+    assert "Round 1" in prior["report"]
+    assert prior["last_hypothesis"] == "try harder facts"

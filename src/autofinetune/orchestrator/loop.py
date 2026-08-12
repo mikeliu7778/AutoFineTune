@@ -110,6 +110,10 @@ def run_experiment(
             rec.last_error = str(e)
             store.save(rec)
             store.save_report(run_id, round_idx, f"# Round {round_idx} FAILED\n\n{e}\n")
+            if store.load(run_id).pause_requested:
+                store.set_status(run_id, RunStatus.paused)
+                store.clear_pause(run_id)
+                return store.load(run_id)
             continue
         except FatalError:
             store.set_status(run_id, RunStatus.failed)
@@ -130,7 +134,7 @@ def _run_one_round(
     round_idx: int,
     predict_fn_factory: PredictFactory,
 ) -> None:
-    plan = _plan_round(llm, cfg, ingest, rec, round_idx)
+    plan = _plan_round(llm, cfg, ingest, rec, round_idx, store, run_id)
     store.save_plan(run_id, round_idx, plan)
 
     existing_holdout = None
@@ -178,14 +182,40 @@ def _run_one_round(
     store.save(rec)
 
 
+def _prior_round_context(store: RunStore, run_id: str, round_idx: int) -> dict[str, Any]:
+    """Artifacts from the previous round for planning context (round_idx > 1)."""
+    prev = round_idx - 1
+    rd = store.round_dir(run_id, prev)
+    ctx: dict[str, Any] = {"prior_round": prev}
+
+    metrics_path = rd / "metrics.json"
+    if metrics_path.is_file():
+        ctx["metrics"] = json.loads(metrics_path.read_text(encoding="utf-8"))
+
+    report_path = rd / "report.md"
+    if report_path.is_file():
+        ctx["report"] = report_path.read_text(encoding="utf-8")[:4000]
+
+    decide_path = rd / "decide.json"
+    if decide_path.is_file():
+        decide = json.loads(decide_path.read_text(encoding="utf-8"))
+        if "hypothesis" in decide:
+            ctx["last_hypothesis"] = decide["hypothesis"]
+        ctx["last_decide"] = decide
+
+    return ctx
+
+
 def _plan_round(
     llm: LLMClient,
     cfg: AppConfig,
     ingest: IngestResult,
     rec: RunRecord,
     round_idx: int,
+    store: RunStore,
+    run_id: str,
 ) -> RoundPlan:
-    user = {
+    user: dict[str, Any] = {
         "round": round_idx,
         "base_model": rec.base_model.model_dump() if rec.base_model else None,
         "route": ingest.route.value,
@@ -197,6 +227,8 @@ def _plan_round(
             "lora_r": cfg.trainer.default_lora_r,
         },
     }
+    if round_idx > 1:
+        user["prior"] = _prior_round_context(store, run_id, round_idx)
     out = llm.complete_json(
         system=(
             "Plan one fine-tuning round for domain knowledge. "
