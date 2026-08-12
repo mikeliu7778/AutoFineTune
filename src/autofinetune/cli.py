@@ -1,3 +1,154 @@
-import typer
+from __future__ import annotations
 
-app = typer.Typer(add_completion=False)
+import json
+import os
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich.console import Console
+from rich.pretty import pprint
+
+from autofinetune.config import load_config
+from autofinetune.llm.client import FakeLLMClient, LiteLLMClient
+from autofinetune.orchestrator.loop import run_experiment
+from autofinetune.store.run_store import RunStore
+from autofinetune.trainer.base import get_trainer
+
+app = typer.Typer(add_completion=False, no_args_is_help=True)
+console = Console()
+
+
+def _build_fake_llm() -> FakeLLMClient:
+    def judge(s, u):
+        items = json.loads(u).get("items", [])
+        return {
+            "scores": [
+                {"question": it["question"], "score": 0.7, "rationale": "fake"}
+                for it in items
+            ]
+        }
+
+    return FakeLLMClient(
+        handlers={
+            "recommend_model": lambda s, u: {
+                "model_id": "Qwen/Qwen2.5-7B-Instruct",
+                "rationale": "fake default",
+            },
+            "round_plan": lambda s, u: {
+                "data_strategy": "synthesize",
+                "target_train_size": 6,
+                "lora": {
+                    "r": 8,
+                    "alpha": 16,
+                    "dropout": 0.05,
+                    "epochs": 1,
+                    "learning_rate": 0.0002,
+                    "per_device_train_batch_size": 1,
+                    "gradient_accumulation_steps": 1,
+                },
+                "eval_focus": "facts",
+                "notes": "",
+            },
+            "synthesize_qa": lambda s, u: {
+                "items": [
+                    {
+                        "question": f"Q{i}",
+                        "answer": f"A{i}",
+                        "source": "synthetic",
+                    }
+                    for i in range(8)
+                ]
+            },
+            "judge_qa": judge,
+            "decide": lambda s, u: {
+                "action": "stop",
+                "hypothesis": "",
+                "reason": "fake stop",
+            },
+        }
+    )
+
+
+def _llm_from_env(cfg):
+    if os.getenv("AUTOFINETUNE_LLM", "").lower() == "fake":
+        return _build_fake_llm()
+    return LiteLLMClient(cfg.orchestrator)
+
+
+@app.command()
+def run(
+    input_dir: Path = typer.Argument(..., exists=True, file_okay=False),
+    config: Optional[Path] = typer.Option(None, "--config"),
+    base_model: Optional[str] = typer.Option(None, "--base-model"),
+    runs_dir: Optional[Path] = typer.Option(None, "--runs-dir"),
+    trainer: Optional[str] = typer.Option(None, "--trainer"),
+) -> None:
+    cfg = load_config(config)
+    if runs_dir:
+        cfg.runs_dir = runs_dir
+    if trainer:
+        cfg.trainer.backend = trainer
+    if os.getenv("AUTOFINETUNE_TRAINER"):
+        cfg.trainer.backend = os.environ["AUTOFINETUNE_TRAINER"]
+
+    store = RunStore(cfg.runs_dir)
+    rec = store.create(input_dir=input_dir)
+    console.print(f"Created run [bold]{rec.run_id}[/bold]")
+    final = run_experiment(
+        cfg,
+        store,
+        rec.run_id,
+        _llm_from_env(cfg),
+        get_trainer(cfg.trainer.backend),
+        base_model_arg=base_model,
+    )
+    console.print(f"Status: {final.status.value}")
+    if final.base_model:
+        console.print(f"Base model: {final.base_model.model_id} ({final.base_model.mode})")
+
+
+@app.command()
+def pause(run_id: str, runs_dir: Path = typer.Option(Path("runs"), "--runs-dir")) -> None:
+    RunStore(runs_dir).request_pause(run_id)
+    console.print(f"Pause requested for {run_id}")
+
+
+@app.command()
+def resume(
+    run_id: str,
+    note: Optional[str] = typer.Option(None, "--note"),
+    config: Optional[Path] = typer.Option(None, "--config"),
+    runs_dir: Path = typer.Option(Path("runs"), "--runs-dir"),
+) -> None:
+    cfg = load_config(config)
+    cfg.runs_dir = runs_dir
+    if os.getenv("AUTOFINETUNE_TRAINER"):
+        cfg.trainer.backend = os.environ["AUTOFINETUNE_TRAINER"]
+    store = RunStore(runs_dir)
+    final = run_experiment(
+        cfg,
+        store,
+        run_id,
+        _llm_from_env(cfg),
+        get_trainer(cfg.trainer.backend),
+        resume_note=note,
+    )
+    console.print(f"Status: {final.status.value}")
+
+
+@app.command()
+def status(run_id: str, runs_dir: Path = typer.Option(Path("runs"), "--runs-dir")) -> None:
+    rec = RunStore(runs_dir).load(run_id)
+    pprint(rec.model_dump())
+
+
+@app.command()
+def report(run_id: str, runs_dir: Path = typer.Option(Path("runs"), "--runs-dir")) -> None:
+    store = RunStore(runs_dir)
+    rec = store.load(run_id)
+    for i in range(1, rec.current_round + 1):
+        path = store.round_dir(run_id, i) / "report.md"
+        console.rule(f"Round {i}")
+        if path.is_file():
+            console.print(path.read_text(encoding="utf-8"))

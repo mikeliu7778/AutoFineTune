@@ -1,3 +1,41 @@
-# autofinetune
+# AutoFineTune
 
-Closed-loop domain-knowledge fine-tuning agent.
+Closed-loop **domain-knowledge** fine-tuning agent (CLI). Cloud LLM plans rounds; local LoRA trains; LLM-as-judge evaluates.
+
+## Quick start (fake / CI)
+
+```bash
+pip install -e ".[dev]"
+export AUTOFINETUNE_LLM=fake
+export AUTOFINETUNE_TRAINER=fake
+autofinetune run ./tests/fixtures/minimal_input --runs-dir ./runs --base-model auto
+```
+
+## Real local training
+
+```bash
+pip install -e ".[train]"
+export OPENAI_API_KEY=...   # or other LiteLLM provider env
+autofinetune run ./my_input --base-model Qwen/Qwen2.5-7B-Instruct --trainer trl
+# or let the orchestrator recommend:
+autofinetune run ./my_input --base-model auto
+```
+
+### Input layout
+
+```text
+input/
+  brief.md      # optional but recommended
+  docs/         # optional md/txt/pdf
+  qa.jsonl      # optional {"question","answer"}
+```
+
+### Commands
+
+- `autofinetune run`
+- `autofinetune pause <run_id>`
+- `autofinetune resume <run_id> --note "..."`
+- `autofinetune status <run_id>`
+- `autofinetune report <run_id>`
+
+See `docs/superpowers/specs/2026-08-12-autofinetune-design.md`.
