@@ -101,6 +101,11 @@ def prepare_datasets(
         if existing_holdout is not None:
             hold_q = {h.question for h in existing_holdout}
             train = [t for t in combined if t.question not in hold_q]
+            if not train:
+                raise RoundError(
+                    "No training items remain after excluding holdout questions; "
+                    "need more or different synthetic QA"
+                )
             return PrepareResult(train=train, holdout=existing_holdout)
         train, holdout = _split(combined, cfg.data.holdout_ratio)
         return PrepareResult(train=train, holdout=holdout)
@@ -110,7 +115,12 @@ def prepare_datasets(
     synth = _synthesize(cfg, ingest, plan, llm, total)
     if existing_holdout is not None:
         hold_q = {h.question for h in existing_holdout}
-        train = [t for t in synth if t.question not in hold_q] or synth
+        train = [t for t in synth if t.question not in hold_q]
+        if not train:
+            raise RoundError(
+                "No training items remain after excluding holdout questions; "
+                "need more or different synthetic QA"
+            )
         return PrepareResult(train=train, holdout=existing_holdout)
     train, holdout = _split(synth, cfg.data.holdout_ratio)
     return PrepareResult(train=train, holdout=holdout)

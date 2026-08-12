@@ -1,5 +1,8 @@
+import pytest
+
 from autofinetune.config import load_config
 from autofinetune.datagen.prepare import prepare_datasets
+from autofinetune.errors import RoundError
 from autofinetune.ingest.bundle import IngestResult
 from autofinetune.llm.client import FakeLLMClient
 from autofinetune.schemas import DataRoute, LoraHyperparams, QAItem, RoundPlan
@@ -35,3 +38,22 @@ def test_none_route_synthesizes_train_and_holdout():
     result = prepare_datasets(cfg, ingest, plan, llm, existing_holdout=None)
     assert len(result.train) >= 1
     assert len(result.holdout) >= 1
+
+
+def test_none_route_existing_holdout_all_synth_overlap_raises():
+    cfg = load_config(None)
+    ingest = IngestResult(route=DataRoute.none, brief="ACME refunds", docs_text="Refunds in 14 days")
+    plan = RoundPlan(data_strategy="synthesize", target_train_size=5, lora=LoraHyperparams())
+    holdout = [QAItem(question=f"Q{i}", answer=f"H{i}") for i in range(3)]
+    llm = FakeLLMClient(
+        handlers={
+            "synthesize_qa": lambda s, u: {
+                "items": [
+                    {"question": f"Q{i}", "answer": f"A{i}", "source": "synthetic"}
+                    for i in range(3)
+                ]
+            }
+        }
+    )
+    with pytest.raises(RoundError, match="holdout"):
+        prepare_datasets(cfg, ingest, plan, llm, existing_holdout=holdout)
