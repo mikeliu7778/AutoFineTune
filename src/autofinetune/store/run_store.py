@@ -30,6 +30,7 @@ class RunRecord(BaseModel):
     updated_at: str = Field(default_factory=_now)
     input_route: str | None = None
     base_model: BaseModelChoice | None = None
+    trainer_backend: str | None = None
     current_round: int = 0
     best_round: int | None = None
     pause_requested: bool = False
@@ -100,6 +101,11 @@ class RunStore:
     def set_route(self, run_id: str, route: str) -> None:
         rec = self.load(run_id)
         rec.input_route = route
+        self._write(rec)
+
+    def set_trainer_backend(self, run_id: str, backend: str) -> None:
+        rec = self.load(run_id)
+        rec.trainer_backend = backend
         self._write(rec)
 
     def round_dir(self, run_id: str, round_idx: int) -> Path:

@@ -382,3 +382,150 @@ def test_plan_includes_prior_round_context(tmp_path: Path):
     assert "report" in prior
     assert "Round 1" in prior["report"]
     assert prior["last_hypothesis"] == "try harder facts"
+
+
+def test_invalid_plan_json_is_round_error_not_stuck(tmp_path: Path):
+    cfg = load_config(None)
+    cfg.trainer.backend = "fake"
+    cfg.budgets.max_rounds = 2
+    cfg.runs_dir = tmp_path / "runs"
+    inp = tmp_path / "in"
+    inp.mkdir()
+    (inp / "brief.md").write_text("ACME billing", encoding="utf-8")
+
+    store = RunStore(cfg.runs_dir)
+    rec = store.create(input_dir=inp)
+    store.set_trainer_backend(rec.run_id, "fake")
+
+    plan_n = {"n": 0}
+
+    def plan(s: str, u: str) -> dict:
+        plan_n["n"] += 1
+        if plan_n["n"] == 1:
+            return {"bogus": True}  # missing RoundPlan fields
+        return _plan_payload(s, u)
+
+    llm = FakeLLMClient(
+        handlers={
+            "recommend_model": lambda s, u: {
+                "model_id": "Qwen/Qwen2.5-7B-Instruct",
+                "rationale": "default",
+            },
+            "round_plan": plan,
+            "synthesize_qa": _synth_payload,
+            "judge_qa": _judge_payload,
+            "decide": lambda s, u: {"action": "stop", "hypothesis": "", "reason": "ok"},
+        }
+    )
+
+    final = run_experiment(
+        cfg,
+        store,
+        rec.run_id,
+        llm,
+        FakeTrainer(),
+        base_model_arg="auto",
+        predict_fn_factory=lambda **kwargs: (lambda q: "A0"),
+    )
+    assert final.status == RunStatus.completed
+    assert final.last_error is None or "Invalid" in (store.load(rec.run_id).last_error or "")
+    assert final.current_round == 2
+    assert "Invalid RoundPlan" in (store.round_dir(rec.run_id, 1) / "report.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_wall_clock_uses_started_at_across_resume(tmp_path: Path):
+    cfg = load_config(None)
+    cfg.trainer.backend = "fake"
+    cfg.budgets.max_rounds = 3
+    cfg.budgets.max_wall_time_sec = 1
+    cfg.runs_dir = tmp_path / "runs"
+    inp = tmp_path / "in"
+    inp.mkdir()
+    (inp / "brief.md").write_text("ACME billing", encoding="utf-8")
+
+    store = RunStore(cfg.runs_dir)
+    rec = store.create(input_dir=inp)
+    store.set_trainer_backend(rec.run_id, "fake")
+    # Simulate a prior start far in the past
+    rec = store.load(rec.run_id)
+    rec.started_at = "2000-01-01T00:00:00+00:00"
+    store.save(rec)
+
+    llm = FakeLLMClient(
+        handlers={
+            "recommend_model": lambda s, u: {
+                "model_id": "Qwen/Qwen2.5-7B-Instruct",
+                "rationale": "default",
+            },
+            "round_plan": _plan_payload,
+            "synthesize_qa": _synth_payload,
+            "judge_qa": _judge_payload,
+            "decide": lambda s, u: {
+                "action": "continue",
+                "hypothesis": "more",
+                "reason": "should not train",
+            },
+        }
+    )
+
+    final = run_experiment(
+        cfg,
+        store,
+        rec.run_id,
+        llm,
+        FakeTrainer(),
+        base_model_arg="auto",
+        predict_fn_factory=lambda **kwargs: (lambda q: "A0"),
+    )
+    assert final.status == RunStatus.completed
+    assert final.current_round == 0
+    assert len([c for c in llm.calls if c[2] == "round_plan"]) == 0
+
+
+def test_trainer_backend_saved_and_default_predict_for_fake(tmp_path: Path):
+    cfg = load_config(None)
+    cfg.trainer.backend = "fake"
+    cfg.budgets.max_rounds = 1
+    cfg.runs_dir = tmp_path / "runs"
+    inp = tmp_path / "in"
+    inp.mkdir()
+    (inp / "brief.md").write_text("ACME billing", encoding="utf-8")
+
+    store = RunStore(cfg.runs_dir)
+    rec = store.create(input_dir=inp)
+
+    llm = FakeLLMClient(
+        handlers={
+            "recommend_model": lambda s, u: {
+                "model_id": "Qwen/Qwen2.5-7B-Instruct",
+                "rationale": "default",
+            },
+            "round_plan": _plan_payload,
+            "synthesize_qa": _synth_payload,
+            "judge_qa": _judge_payload,
+            "decide": lambda s, u: {"action": "stop", "hypothesis": "", "reason": "done"},
+        }
+    )
+
+    final = run_experiment(
+        cfg,
+        store,
+        rec.run_id,
+        llm,
+        FakeTrainer(),
+        base_model_arg="auto",
+        # omit predict_fn_factory → get_predict_factory("fake") = lookup
+    )
+    assert final.trainer_backend == "fake"
+    assert final.status == RunStatus.completed
+    assert final.llm_cost_usd_est > 0
+    assert final.started_at is not None
+
+
+def test_trl_backend_selects_non_lookup_predict_factory():
+    from autofinetune.eval.predict import get_predict_factory, lookup_predict_factory
+
+    assert get_predict_factory("trl") is not lookup_predict_factory
+

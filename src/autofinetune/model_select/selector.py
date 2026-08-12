@@ -21,9 +21,25 @@ def select_base_model(
     llm: LLMClient,
     base_model_arg: str | None,
 ) -> BaseModelChoice:
-    requested = (base_model_arg if base_model_arg is not None else cfg.base_model).strip()
+    raw = base_model_arg if base_model_arg is not None else cfg.base_model
+    requested = (raw or "").strip()
+    if not requested:
+        raise FatalError("base model pin must be non-empty (use 'auto' or a HF model id)")
     if requested != "auto":
-        return BaseModelChoice(model_id=requested, mode="user", rationale="user-specified")
+        rationale = "user-specified"
+        if cfg.allowlist:
+            by_id = {e.id: e for e in cfg.allowlist}
+            if requested not in by_id:
+                rationale = "user-specified (outside allowlist)"
+            else:
+                entry = by_id[requested]
+                if entry.min_vram_gb > cfg.gpu_profile.vram_gb:
+                    raise FatalError(
+                        f"Pinned model '{requested}' requires min_vram_gb="
+                        f"{entry.min_vram_gb} but GPU profile has "
+                        f"{cfg.gpu_profile.vram_gb}GB"
+                    )
+        return BaseModelChoice(model_id=requested, mode="user", rationale=rationale)
 
     candidates = filter_allowlist(cfg.allowlist, cfg.gpu_profile)
     if not candidates:

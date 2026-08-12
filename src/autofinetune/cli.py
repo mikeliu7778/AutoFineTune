@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.pretty import pprint
 
 from autofinetune.config import load_config
+from autofinetune.eval.predict import get_predict_factory
 from autofinetune.llm.client import FakeLLMClient, LiteLLMClient
 from autofinetune.orchestrator.loop import run_experiment
 from autofinetune.store.run_store import RunStore
@@ -76,6 +77,18 @@ def _llm_from_env(cfg):
     return LiteLLMClient(cfg.orchestrator)
 
 
+def _apply_trainer_override(cfg, trainer: str | None) -> bool:
+    """Apply CLI/env trainer override. Returns True if an override was applied."""
+    if trainer:
+        cfg.trainer.backend = trainer
+        return True
+    env = os.getenv("AUTOFINETUNE_TRAINER")
+    if env:
+        cfg.trainer.backend = env
+        return True
+    return False
+
+
 @app.command()
 def run(
     input_dir: Path = typer.Argument(..., exists=True, file_okay=False),
@@ -87,13 +100,11 @@ def run(
     cfg = load_config(config)
     if runs_dir:
         cfg.runs_dir = runs_dir
-    if trainer:
-        cfg.trainer.backend = trainer
-    if os.getenv("AUTOFINETUNE_TRAINER"):
-        cfg.trainer.backend = os.environ["AUTOFINETUNE_TRAINER"]
+    _apply_trainer_override(cfg, trainer)
 
     store = RunStore(cfg.runs_dir)
     rec = store.create(input_dir=input_dir)
+    store.set_trainer_backend(rec.run_id, cfg.trainer.backend)
     console.print(f"Created run [bold]{rec.run_id}[/bold]")
     final = run_experiment(
         cfg,
@@ -102,6 +113,7 @@ def run(
         _llm_from_env(cfg),
         get_trainer(cfg.trainer.backend),
         base_model_arg=base_model,
+        predict_fn_factory=get_predict_factory(cfg.trainer.backend),
     )
     console.print(f"Status: {final.status.value}")
     if final.base_model:
@@ -120,12 +132,17 @@ def resume(
     note: Optional[str] = typer.Option(None, "--note"),
     config: Optional[Path] = typer.Option(None, "--config"),
     runs_dir: Path = typer.Option(Path("runs"), "--runs-dir"),
+    trainer: Optional[str] = typer.Option(None, "--trainer"),
 ) -> None:
     cfg = load_config(config)
     cfg.runs_dir = runs_dir
-    if os.getenv("AUTOFINETUNE_TRAINER"):
-        cfg.trainer.backend = os.environ["AUTOFINETUNE_TRAINER"]
     store = RunStore(runs_dir)
+    rec = store.load(run_id)
+    overridden = _apply_trainer_override(cfg, trainer)
+    if not overridden and rec.trainer_backend:
+        cfg.trainer.backend = rec.trainer_backend
+    if overridden:
+        store.set_trainer_backend(run_id, cfg.trainer.backend)
     final = run_experiment(
         cfg,
         store,
@@ -133,6 +150,7 @@ def resume(
         _llm_from_env(cfg),
         get_trainer(cfg.trainer.backend),
         resume_note=note,
+        predict_fn_factory=get_predict_factory(cfg.trainer.backend),
     )
     console.print(f"Status: {final.status.value}")
 

@@ -22,6 +22,33 @@ def test_user_pin_wins():
     assert choice.model_id == "Qwen/Qwen2.5-7B-Instruct"
 
 
+def test_empty_pin_is_fatal():
+    cfg = load_config(None)
+    llm = FakeLLMClient(handlers={})
+    with pytest.raises(FatalError, match="non-empty"):
+        select_base_model(cfg, _ingest(), llm, base_model_arg="   ")
+
+
+def test_pin_outside_allowlist_allowed_with_note():
+    cfg = load_config(None)
+    llm = FakeLLMClient(handlers={})
+    choice = select_base_model(
+        cfg, _ingest(), llm, base_model_arg="custom/org-model-not-listed"
+    )
+    assert choice.mode == "user"
+    assert "outside allowlist" in choice.rationale
+
+
+def test_pin_min_vram_exceeds_gpu_is_fatal():
+    cfg = load_config(None)
+    cfg.gpu_profile.vram_gb = 4
+    llm = FakeLLMClient(handlers={})
+    with pytest.raises(FatalError, match="min_vram"):
+        select_base_model(
+            cfg, _ingest(), llm, base_model_arg="Qwen/Qwen2.5-7B-Instruct"
+        )
+
+
 def test_auto_uses_llm_within_allowlist():
     cfg = load_config(None)
     llm = FakeLLMClient(

@@ -36,16 +36,17 @@ def read_jsonl(path: Path) -> list[QAItem]:
 
 def _split(qa: list[QAItem], holdout_ratio: float, seed: int = 7) -> tuple[list[QAItem], list[QAItem]]:
     items = list(qa)
+    if len(items) < 2:
+        raise RoundError(
+            "Need at least 2 QA items to split train/holdout without overlap; "
+            f"got {len(items)} — provide more data or use synthesize/partial route"
+        )
     rng = random.Random(seed)
     rng.shuffle(items)
-    n_hold = max(1, int(len(items) * holdout_ratio)) if len(items) > 1 else 1
-    n_hold = min(n_hold, len(items) - 1) if len(items) > 1 else len(items)
+    n_hold = max(1, int(len(items) * holdout_ratio))
+    n_hold = min(n_hold, len(items) - 1)
     holdout = items[:n_hold]
-    train = items[n_hold:] or items[:1]
-    if len(items) == 1:
-        # single example: duplicate risk — keep as train and holdout copy marked for eval only
-        holdout = items
-        train = items
+    train = items[n_hold:]
     return train, holdout
 
 
@@ -87,11 +88,16 @@ def prepare_datasets(
     existing_holdout: list[QAItem] | None,
 ) -> PrepareResult:
     if ingest.route == DataRoute.full:
-        train, holdout = _split(ingest.qa, cfg.data.holdout_ratio)
         if existing_holdout is not None:
             hold_q = {h.question for h in existing_holdout}
             train = [t for t in ingest.qa if t.question not in hold_q]
-            holdout = existing_holdout
+            if not train:
+                raise RoundError(
+                    "No training items remain after excluding holdout questions; "
+                    "need at least 2 QA items for full route"
+                )
+            return PrepareResult(train=train, holdout=existing_holdout)
+        train, holdout = _split(ingest.qa, cfg.data.holdout_ratio)
         return PrepareResult(train=train, holdout=holdout)
 
     if ingest.route == DataRoute.partial:

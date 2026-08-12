@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
+
+from pydantic import ValidationError
 
 from autofinetune.config import AppConfig
 from autofinetune.datagen.prepare import prepare_datasets, read_jsonl, write_jsonl
 from autofinetune.errors import FatalError, RoundError
+from autofinetune.eval.predict import get_predict_factory, lookup_predict_factory
 from autofinetune.eval.runner import evaluate_holdout
 from autofinetune.ingest.bundle import IngestResult, ingest_bundle
 from autofinetune.llm.client import LLMClient
@@ -19,18 +22,21 @@ from autofinetune.trainer.base import TrainerBackend
 
 PredictFactory = Callable[..., Callable[[str], str]]
 
+# Back-compat alias for tests / callers that imported the default lookup factory.
+_default_predict_factory = lookup_predict_factory
 
-def _default_predict_factory(**kwargs: Any) -> Callable[[str], str]:
-    train_path: Path | None = kwargs.get("train_jsonl")
-    lookup: dict[str, str] = {}
-    if train_path and train_path.is_file():
-        for item in read_jsonl(train_path):
-            lookup[item.question] = item.answer
 
-    def predict(q: str) -> str:
-        return lookup.get(q, "")
+def _parse_started_at(iso: str) -> float:
+    return datetime.fromisoformat(iso).timestamp()
 
-    return predict
+
+def _sync_llm_cost(store: RunStore, run_id: str, llm: LLMClient) -> None:
+    cost = getattr(llm, "cost_usd_est", None)
+    if cost is None:
+        return
+    rec = store.load(run_id)
+    rec.llm_cost_usd_est = float(cost)
+    store.save(rec)
 
 
 def run_experiment(
@@ -43,11 +49,16 @@ def run_experiment(
     resume_note: str | None = None,
     predict_fn_factory: PredictFactory | None = None,
 ) -> RunRecord:
-    predict_fn_factory = predict_fn_factory or _default_predict_factory
+    if predict_fn_factory is None:
+        predict_fn_factory = get_predict_factory(cfg.trainer.backend)
     rec = store.load(run_id)
     if resume_note:
         rec.user_note = resume_note
         store.save(rec)
+
+    if rec.trainer_backend is None:
+        store.set_trainer_backend(run_id, cfg.trainer.backend)
+        rec = store.load(run_id)
 
     input_dir = store.run_dir(run_id) / "input"
     ingest = ingest_bundle(input_dir, cfg)
@@ -60,16 +71,20 @@ def run_experiment(
         rec = store.load(run_id)
 
     if rec.started_at is None:
-        rec.started_at = rec.created_at
+        rec.started_at = datetime.now(timezone.utc).isoformat()
         store.save(rec)
+        rec = store.load(run_id)
 
     store.set_status(run_id, RunStatus.running)
-    started = time.time()
+    assert rec.started_at is not None
+    started_ts = _parse_started_at(rec.started_at)
     start_round = rec.current_round + 1
 
     for round_idx in range(start_round, cfg.budgets.max_rounds + 1):
         rec = store.load(run_id)
-        if cfg.budgets.max_wall_time_sec and (time.time() - started) > cfg.budgets.max_wall_time_sec:
+        _sync_llm_cost(store, run_id, llm)
+        rec = store.load(run_id)
+        if cfg.budgets.max_wall_time_sec and (time.time() - started_ts) > cfg.budgets.max_wall_time_sec:
             store.set_status(run_id, RunStatus.completed)
             break
         if (
@@ -91,6 +106,7 @@ def run_experiment(
                 round_idx,
                 predict_fn_factory,
             )
+            _sync_llm_cost(store, run_id, llm)
             if store.load(run_id).pause_requested:
                 store.set_status(run_id, RunStatus.paused)
                 store.clear_pause(run_id)
@@ -105,6 +121,7 @@ def run_experiment(
                 return store.load(run_id)
 
         except RoundError as e:
+            _sync_llm_cost(store, run_id, llm)
             rec = store.load(run_id)
             rec.current_round = round_idx
             rec.last_error = str(e)
@@ -238,7 +255,10 @@ def _plan_round(
         user=json.dumps(user, ensure_ascii=False),
         schema_name="round_plan",
     )
-    return RoundPlan.model_validate(out)
+    try:
+        return RoundPlan.model_validate(out)
+    except ValidationError as e:
+        raise RoundError(f"Invalid RoundPlan from LLM: {e}") from e
 
 
 def _decide(
@@ -264,7 +284,10 @@ def _decide(
         ),
         schema_name="decide",
     )
-    return DecideResult.model_validate(out)
+    try:
+        return DecideResult.model_validate(out)
+    except ValidationError as e:
+        raise RoundError(f"Invalid DecideResult from LLM: {e}") from e
 
 
 def _maybe_update_best(

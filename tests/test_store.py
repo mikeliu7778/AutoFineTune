@@ -38,3 +38,13 @@ def test_set_base_model_persisted(tmp_path: Path):
     loaded = store.load(rec.run_id)
     assert loaded.base_model is not None
     assert loaded.base_model.model_id.endswith("7B-Instruct")
+
+
+def test_trainer_backend_persisted(tmp_path: Path):
+    store = RunStore(tmp_path / "runs")
+    (tmp_path / "in").mkdir()
+    (tmp_path / "in" / "brief.md").write_text("x", encoding="utf-8")
+    rec = store.create(input_dir=tmp_path / "in")
+    store.set_trainer_backend(rec.run_id, "trl")
+    loaded = store.load(rec.run_id)
+    assert loaded.trainer_backend == "trl"

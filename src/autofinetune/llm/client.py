@@ -8,8 +8,13 @@ from typing import Any, Protocol
 from autofinetune.config import OrchestratorConfig
 from autofinetune.errors import FatalError, RoundError
 
+# Best-effort v1 estimate; not provider-metered billing.
+EST_COST_USD_PER_CALL = 0.001
+
 
 class LLMClient(Protocol):
+    cost_usd_est: float
+
     def complete_json(self, system: str, user: str, schema_name: str) -> dict[str, Any]:
         ...
 
@@ -18,9 +23,11 @@ class FakeLLMClient:
     def __init__(self, handlers: dict[str, Callable[[str, str], dict[str, Any]]]) -> None:
         self.handlers = handlers
         self.calls: list[tuple[str, str, str]] = []
+        self.cost_usd_est: float = 0.0
 
     def complete_json(self, system: str, user: str, schema_name: str) -> dict[str, Any]:
         self.calls.append((system, user, schema_name))
+        self.cost_usd_est += EST_COST_USD_PER_CALL
         if schema_name not in self.handlers:
             raise FatalError(f"FakeLLMClient missing handler for {schema_name}")
         return self.handlers[schema_name](system, user)
@@ -29,6 +36,7 @@ class FakeLLMClient:
 class LiteLLMClient:
     def __init__(self, cfg: OrchestratorConfig) -> None:
         self.cfg = cfg
+        self.cost_usd_est: float = 0.0
 
     def complete_json(self, system: str, user: str, schema_name: str) -> dict[str, Any]:
         try:
@@ -53,6 +61,7 @@ class LiteLLMClient:
                     ],
                 )
                 content = resp.choices[0].message.content or "{}"
+                self.cost_usd_est += EST_COST_USD_PER_CALL
                 return json.loads(content)
             except Exception as e:  # noqa: BLE001 — retried network/provider errors
                 last_err = e

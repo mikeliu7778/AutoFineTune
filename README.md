@@ -38,4 +38,9 @@ input/
 - `autofinetune status <run_id>`
 - `autofinetune report <run_id>`
 
+### Budgets
+
+`max_rounds` and `max_wall_time_sec` are enforced (wall clock uses `started_at` across resume).  
+`max_llm_cost_usd` is **best-effort** in v1: FakeLLM/LiteLLM clients add a fixed estimate (~$0.001 per `complete_json` call). It is **not** provider-metered billing.
+
 See `docs/superpowers/specs/2026-08-12-autofinetune-design.md`.

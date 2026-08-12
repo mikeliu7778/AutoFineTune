@@ -21,6 +21,16 @@ def test_full_route_splits_without_llm():
     assert all(t.question not in hold_q for t in result.train)
 
 
+def test_full_route_single_qa_raises():
+    cfg = load_config(None)
+    qa = [QAItem(question="Q0", answer="A0")]
+    ingest = IngestResult(route=DataRoute.full, brief="b", qa=qa)
+    plan = RoundPlan(data_strategy="use_user_qa", target_train_size=1)
+    llm = FakeLLMClient(handlers={})
+    with pytest.raises(RoundError, match="at least 2"):
+        prepare_datasets(cfg, ingest, plan, llm, existing_holdout=None)
+
+
 def test_none_route_synthesizes_train_and_holdout():
     cfg = load_config(None)
     ingest = IngestResult(route=DataRoute.none, brief="ACME refunds", docs_text="Refunds in 14 days")
