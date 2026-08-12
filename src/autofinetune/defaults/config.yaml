@@ -1,0 +1,23 @@
+base_model: auto
+orchestrator:
+  model: openai/gpt-4o-mini
+  temperature: 0.2
+  max_retries: 3
+trainer:
+  backend: trl  # trl | fake
+  max_seq_length: 2048
+  default_lora_r: 16
+  default_lora_alpha: 32
+  default_epochs: 1
+  default_lr: 2.0e-4
+gpu_profile:
+  name: single-24gb
+  vram_gb: 24
+data:
+  min_qa_for_full: 50
+  holdout_ratio: 0.2
+  target_train_size: 200
+budgets:
+  max_rounds: 3
+  max_wall_time_sec: 86400
+  max_llm_cost_usd: null

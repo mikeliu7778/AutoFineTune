@@ -1,0 +1,16 @@
+models:
+  - id: Qwen/Qwen2.5-7B-Instruct
+    approx_params_b: 7.6
+    min_vram_gb: 16
+    chat_template: qwen
+    notes: "Default 24GB-friendly instruct model"
+  - id: Qwen/Qwen2.5-3B-Instruct
+    approx_params_b: 3.1
+    min_vram_gb: 8
+    chat_template: qwen
+    notes: "Smaller / 8-16GB profile"
+  - id: meta-llama/Llama-3.1-8B-Instruct
+    approx_params_b: 8.0
+    min_vram_gb: 18
+    chat_template: llama3
+    notes: "Requires HF access token for gated weights"
