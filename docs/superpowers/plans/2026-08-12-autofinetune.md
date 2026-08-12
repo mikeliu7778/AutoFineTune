@@ -2094,7 +2094,7 @@ from autofinetune.orchestrator.loop import run_experiment
 __all__ = ["run_experiment"]
 ```
 
-**Note for implementer:** Remove the duplicate `evaluate_holdout` call shown in the sketch (keep a single call on frozen holdout). Ensure `judge_qa` fake handler scores length can be dynamic — in the test, prefer scoring based on parsed user JSON length or return a constant list long enough; adjust Fake handler to:
+**Note for implementer:** Ensure `judge_qa` fake handler scores length is dynamic — adjust Fake handler to:
 
 ```python
 "judge_qa": lambda s, u: {
@@ -2401,7 +2401,7 @@ git commit -m "feat: add CLI and README for fake and local training flows"
 
 ## Placeholder / consistency notes fixed in plan
 
-- Single `evaluate_holdout` call on frozen holdout (implementer must not leave the duplicate in the sketch).
+- Single `evaluate_holdout` call on frozen holdout in the orchestrator round body.
 - `RoundPlan` / `DecideResult` / `BaseModelChoice` names consistent across tasks.
 - `get_trainer("fake"|"trl")` matches config `trainer.backend`.
 - CLI env `AUTOFINETUNE_LLM=fake` / `AUTOFINETUNE_TRAINER=fake` for CI without GPU.
