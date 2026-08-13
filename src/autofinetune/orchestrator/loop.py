@@ -158,6 +158,11 @@ def _run_one_round(
 
     existing_holdout = None
     hp = store.holdout_path(run_id)
+    if not hp.is_file():
+        # Prefer curated holdout shipped with the input bundle when present.
+        curated = store.run_dir(run_id) / "input" / "holdout.jsonl"
+        if curated.is_file():
+            hp.write_text(curated.read_text(encoding="utf-8"), encoding="utf-8")
     if hp.is_file():
         existing_holdout = read_jsonl(hp)
 
