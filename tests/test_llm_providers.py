@@ -2,6 +2,7 @@ import pytest
 
 from autofinetune.config import OrchestratorConfig
 from autofinetune.errors import FatalError
+from autofinetune.llm.client import LiteLLMClient
 from autofinetune.llm.providers import resolve_litellm_call
 
 
@@ -62,3 +63,71 @@ def test_litellm_provider_no_key_enforcement(monkeypatch):
     resolved = resolve_litellm_call(cfg)
     assert resolved.model == "anthropic/claude-3-haiku"
     assert resolved.api_key is None
+
+
+def test_litellm_client_passes_deepseek_kwargs(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-test")
+    calls: list[dict] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+
+        class Msg:
+            content = '{"ok": true}'
+
+        class Choice:
+            message = Msg()
+
+        class Resp:
+            choices = [Choice()]
+
+        return Resp()
+
+    import sys
+    import types
+
+    fake_litellm = types.ModuleType("litellm")
+    fake_litellm.completion = fake_completion
+    monkeypatch.setitem(sys.modules, "litellm", fake_litellm)
+
+    client = LiteLLMClient(OrchestratorConfig(provider="deepseek", model="deepseek-v4-flash"))
+    out = client.complete_json("sys", "user", "round_plan")
+    assert out == {"ok": True}
+    assert calls[0]["model"] == "openai/deepseek-v4-flash"
+    assert calls[0]["api_base"] == "https://api.deepseek.com"
+    assert calls[0]["api_key"] == "sk-ds-test"
+    assert calls[0]["response_format"] == {"type": "json_object"}
+
+
+def test_litellm_client_openai_omits_forced_deepseek_base(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+    calls: list[dict] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+
+        class Msg:
+            content = "{}"
+
+        class Choice:
+            message = Msg()
+
+        class Resp:
+            choices = [Choice()]
+
+        return Resp()
+
+    import sys
+    import types
+
+    fake_litellm = types.ModuleType("litellm")
+    fake_litellm.completion = fake_completion
+    monkeypatch.setitem(sys.modules, "litellm", fake_litellm)
+
+    client = LiteLLMClient(
+        OrchestratorConfig(provider="openai", model="openai/gpt-4o-mini")
+    )
+    client.complete_json("sys", "user", "x")
+    assert calls[0]["model"] == "openai/gpt-4o-mini"
+    assert "api_base" not in calls[0]
+    assert calls[0]["api_key"] == "sk-oai"

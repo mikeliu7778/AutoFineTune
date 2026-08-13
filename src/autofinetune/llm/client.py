@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from autofinetune.config import OrchestratorConfig
 from autofinetune.errors import FatalError, RoundError
+from autofinetune.llm.providers import resolve_litellm_call
 
 # Best-effort v1 estimate; not provider-metered billing.
 EST_COST_USD_PER_CALL = 0.001
@@ -44,14 +45,16 @@ class LiteLLMClient:
         except ImportError as e:
             raise FatalError("litellm is required for cloud orchestrator") from e
 
+        resolved = resolve_litellm_call(self.cfg)
+
         last_err: Exception | None = None
         for attempt in range(self.cfg.max_retries):
             try:
-                resp = completion(
-                    model=self.cfg.model,
-                    temperature=self.cfg.temperature,
-                    response_format={"type": "json_object"},
-                    messages=[
+                kwargs = {
+                    "model": resolved.model,
+                    "temperature": self.cfg.temperature,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
                         {
                             "role": "system",
                             "content": system
@@ -59,10 +62,17 @@ class LiteLLMClient:
                         },
                         {"role": "user", "content": user},
                     ],
-                )
+                }
+                if resolved.api_base is not None:
+                    kwargs["api_base"] = resolved.api_base
+                if resolved.api_key is not None:
+                    kwargs["api_key"] = resolved.api_key
+                resp = completion(**kwargs)
                 content = resp.choices[0].message.content or "{}"
                 self.cost_usd_est += EST_COST_USD_PER_CALL
                 return json.loads(content)
+            except FatalError:
+                raise
             except Exception as e:  # noqa: BLE001 — retried network/provider errors
                 last_err = e
                 time.sleep(min(2**attempt, 8))
