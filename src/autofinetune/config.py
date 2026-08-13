@@ -11,9 +11,11 @@ from autofinetune.schemas import AllowlistEntry, GpuProfile
 
 
 class OrchestratorConfig(BaseModel):
-    model: str = "openai/gpt-4o-mini"
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"
     temperature: float = 0.2
     max_retries: int = 3
+    api_base: str | None = None
 
 
 class TrainerConfig(BaseModel):
