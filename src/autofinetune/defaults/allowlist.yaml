@@ -1,4 +1,9 @@
 models:
+  - id: Qwen/Qwen2.5-1.5B-Instruct
+    approx_params_b: 1.5
+    min_vram_gb: 6
+    chat_template: qwen
+    notes: "Apple Silicon / low-VRAM friendly"
   - id: Qwen/Qwen2.5-7B-Instruct
     approx_params_b: 7.6
     min_vram_gb: 16

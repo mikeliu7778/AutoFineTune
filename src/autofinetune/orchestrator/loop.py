@@ -66,7 +66,9 @@ def run_experiment(
 
     # resume: never re-select if base_model already recorded
     if rec.base_model is None:
-        choice = select_base_model(cfg, ingest, llm, base_model_arg)
+        choice = select_base_model(
+            cfg, ingest, llm, base_model_arg, trainer_backend=cfg.trainer.backend
+        )
         store.set_base_model(run_id, choice)
         rec = store.load(run_id)
 

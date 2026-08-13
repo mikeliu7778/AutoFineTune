@@ -34,8 +34,8 @@ def _build_fake_llm() -> FakeLLMClient:
     return FakeLLMClient(
         handlers={
             "recommend_model": lambda s, u: {
-                "model_id": "Qwen/Qwen2.5-7B-Instruct",
-                "rationale": "fake default",
+                "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+                "rationale": "fake small default",
             },
             "round_plan": lambda s, u: {
                 "data_strategy": "synthesize",

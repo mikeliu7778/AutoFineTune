@@ -20,6 +20,7 @@ def select_base_model(
     ingest: IngestResult,
     llm: LLMClient,
     base_model_arg: str | None,
+    trainer_backend: str | None = None,
 ) -> BaseModelChoice:
     raw = base_model_arg if base_model_arg is not None else cfg.base_model
     requested = (raw or "").strip()
@@ -54,11 +55,21 @@ def select_base_model(
         "gpu": cfg.gpu_profile.model_dump(),
         "candidates": [e.model_dump() for e in candidates],
     }
+    if trainer_backend is not None:
+        payload["trainer_backend"] = trainer_backend
+
+    system = (
+        "You recommend a base HF model for domain LoRA fine-tuning. "
+        "Choose ONLY from candidates. Return JSON keys: model_id, rationale."
+    )
+    if trainer_backend == "mlx" or cfg.gpu_profile.vram_gb <= 16:
+        system += (
+            " Prefer the smallest instruct model that fits unless the brief "
+            "clearly needs larger capacity."
+        )
+
     out = llm.complete_json(
-        system=(
-            "You recommend a base HF model for domain LoRA fine-tuning. "
-            "Choose ONLY from candidates. Return JSON keys: model_id, rationale."
-        ),
+        system=system,
         user=json.dumps(payload, ensure_ascii=False),
         schema_name="recommend_model",
     )
