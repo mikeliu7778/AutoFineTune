@@ -15,11 +15,15 @@ autofinetune run ./tests/fixtures/minimal_input --runs-dir ./runs --base-model a
 
 ```bash
 pip install -e ".[train]"
-export OPENAI_API_KEY=...   # or other LiteLLM provider env
+export DEEPSEEK_API_KEY=...   # default orchestrator: DeepSeek deepseek-v4-flash
+# Optional: override model in config.yaml → orchestrator.model: deepseek-v4-pro
+# Optional: provider: openai + export OPENAI_API_KEY=...
 autofinetune run ./my_input --base-model Qwen/Qwen2.5-7B-Instruct --trainer trl
 # or let the orchestrator recommend:
 autofinetune run ./my_input --base-model auto
 ```
+
+DeepSeek API docs: https://api-docs.deepseek.com/zh-cn/
 
 ### Input layout
 
