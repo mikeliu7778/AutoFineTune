@@ -128,7 +128,7 @@ def test_mlx_backend_writes_completions_and_calls_train(
     assert captured["grad_accumulation_steps"] == 4
     assert captured["learning_rate"] == 1e-4
     assert captured["config"]["lora_parameters"]["rank"] == 8
-    assert captured["config"]["lora_parameters"]["scale"] == 16
+    assert captured["config"]["lora_parameters"]["scale"] == 2.0  # alpha / r
     assert captured["config"]["lora_parameters"]["dropout"] == 0.1
 
 

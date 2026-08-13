@@ -47,10 +47,11 @@ def _write_completions_jsonl(data_dir: Path, rows: list[dict[str, str]]) -> Path
 
 def _write_lora_config(path: Path, lora: LoraHyperparams) -> Path:
     # mlx-lm only accepts LoRA rank/scale/dropout via YAML (not CLI flags).
+    # mlx-lm scale is α/r (PEFT-compatible effective scale), not raw alpha.
     payload = {
         "lora_parameters": {
             "rank": lora.r,
-            "scale": lora.alpha,
+            "scale": lora.alpha / max(lora.r, 1),
             "dropout": lora.dropout,
         }
     }

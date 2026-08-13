@@ -54,6 +54,16 @@ autofinetune run ./my_input --base-model Qwen/Qwen2.5-1.5B-Instruct
 
 On Darwin, `auto` resolves to MLX. Prefer **≤3B** instruct models (e.g. `Qwen2.5-1.5B-Instruct`, `Qwen2.5-3B-Instruct`) — the allowlist and recommend path bias toward small models on ~16GB unified memory. Override with `--trainer mlx` or `trainer.backend: mlx` in config.
 
+When your config omits `gpu_profile`, Darwin defaults to `apple-unified-16gb` with `vram_gb: 16` so allowlist filtering matches typical Apple Silicon unified memory. Override in `config.yaml`:
+
+```yaml
+gpu_profile:
+  name: apple-unified-36gb
+  vram_gb: 36
+```
+
+MLX maps RoundPlan `lora.alpha` / `lora.r` to mlx-lm `scale = alpha/r` (PEFT-compatible effective scale).
+
 DeepSeek API docs: https://api-docs.deepseek.com/zh-cn/
 
 ### Input layout
