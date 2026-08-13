@@ -76,7 +76,8 @@ def _build_mlx_lora_cmd(
     return [
         sys.executable,
         "-m",
-        "mlx_lm.lora",
+        "mlx_lm",
+        "lora",
         "--model",
         model,
         "--train",

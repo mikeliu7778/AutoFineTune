@@ -71,10 +71,51 @@ def trl_predict_factory(**kwargs: Any) -> Callable[[str], str]:
     return predict
 
 
+def _mlx_generation_prompt(tokenizer: Any, question: str) -> Any:
+    """Match mlx-lm CompletionsDataset: chat-wrap the ### Question prompt."""
+    user_content = f"### Question:\n{question}\n\n### Answer:\n"
+    apply = getattr(tokenizer, "apply_chat_template", None)
+    if apply is None:
+        return user_content
+    messages = [{"role": "user", "content": user_content}]
+    try:
+        return apply(messages, tokenize=False, add_generation_prompt=True)
+    except Exception:  # noqa: BLE001
+        return user_content
+
+
+def mlx_predict_factory(**kwargs: Any) -> Callable[[str], str]:
+    """Load base model + MLX adapter and generate short greedy answers."""
+    base_model_id: str = kwargs["base_model_id"]
+    adapter_dir: Path = Path(kwargs["adapter_dir"])
+    try:
+        from mlx_lm import generate, load
+    except ImportError as e:
+        raise FatalError(
+            "MLX predict requires extras: pip install 'autofinetune[mlx]'"
+        ) from e
+
+    try:
+        model, tokenizer = load(base_model_id, adapter_path=str(adapter_dir))
+    except FatalError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise RoundError(f"MLX predict load failed: {e}") from e
+
+    def predict(q: str) -> str:
+        prompt = _mlx_generation_prompt(tokenizer, q)
+        text = generate(model, tokenizer, prompt=prompt, max_tokens=64)
+        return str(text).strip()
+
+    return predict
+
+
 def get_predict_factory(backend: str) -> PredictFactory:
     key = backend.strip().lower()
     if key == "fake":
         return lookup_predict_factory
     if key == "trl":
         return trl_predict_factory
+    if key == "mlx":
+        return mlx_predict_factory
     raise FatalError(f"Unknown predict factory for trainer backend: {backend}")

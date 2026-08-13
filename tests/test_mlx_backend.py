@@ -39,7 +39,7 @@ def test_build_mlx_lora_cmd_includes_adapter_path(tmp_path: Path):
         grad_accumulation_steps=8,
         config_path=config,
     )
-    assert cmd[1:3] == ["-m", "mlx_lm.lora"]
+    assert cmd[1:4] == ["-m", "mlx_lm", "lora"]
     assert "--adapter-path" in cmd
     assert cmd[cmd.index("--adapter-path") + 1] == str(adapter)
     assert "--data" in cmd
