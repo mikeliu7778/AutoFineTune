@@ -34,4 +34,8 @@ def get_trainer(name: str) -> TrainerBackend:
         from autofinetune.trainer.trl_backend import TRLTrainerBackend
 
         return TRLTrainerBackend()
+    if key == "mlx":
+        from autofinetune.trainer.mlx_backend import MLXTrainerBackend
+
+        return MLXTrainerBackend()
     raise FatalError(f"Unknown trainer backend: {name}")

@@ -28,6 +28,10 @@ train = [
   "accelerate>=0.33",
   "pypdf>=4.0",
 ]
+mlx = [
+  "mlx",
+  "mlx-lm[train]",
+]
 dev = [
   "pytest>=8.0",
   "autofinetune[train]",
