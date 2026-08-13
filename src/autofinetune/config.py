@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ class OrchestratorConfig(BaseModel):
 
 
 class TrainerConfig(BaseModel):
-    backend: str = "trl"
+    backend: str = "auto"
     max_seq_length: int = 2048
     default_lora_r: int = 16
     default_lora_alpha: int = 32
@@ -67,8 +68,11 @@ def _default_yaml(name: str) -> dict[str, Any]:
 def load_config(path: Path | None = None) -> AppConfig:
     raw = _default_yaml("config.yaml")
     allow_raw = _default_yaml("allowlist.yaml")
+    user: dict[str, Any] = {}
+    user_has_gpu = False
     if path is not None:
         user = _read_yaml(path)
+        user_has_gpu = "gpu_profile" in user
         raw.update(user)
         if "allowlist" in user or "models" in user:
             allow_raw = user.get("allowlist") or user
@@ -76,4 +80,6 @@ def load_config(path: Path | None = None) -> AppConfig:
     raw = {k: v for k, v in raw.items() if k != "allowlist"}
     cfg = AppConfig.model_validate(raw)
     cfg.allowlist = [AllowlistEntry.model_validate(m) for m in models]
+    if platform.system() == "Darwin" and not user_has_gpu:
+        cfg.gpu_profile = GpuProfile(name="apple-unified-16gb", vram_gb=16)
     return cfg

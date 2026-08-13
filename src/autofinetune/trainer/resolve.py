@@ -42,3 +42,21 @@ def resolve_trainer_backend(name: str) -> str:
             "Set --trainer fake|trl|mlx explicitly."
         )
     raise FatalError(f"Unknown trainer backend: {name}")
+
+
+def finalize_trainer_backend(
+    requested: str,
+    *,
+    stored: str | None = None,
+    overridden: bool = False,
+    is_resume: bool = False,
+) -> str:
+    if is_resume and not overridden and stored:
+        return stored.strip().lower()
+    resolved = resolve_trainer_backend(requested)
+    if is_resume and overridden and stored:
+        if resolved != stored.strip().lower():
+            raise FatalError(
+                f"trainer backend mismatch: resolved {resolved!r} vs stored {stored!r}"
+            )
+    return resolved

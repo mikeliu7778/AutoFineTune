@@ -15,6 +15,7 @@ from autofinetune.llm.client import FakeLLMClient, LiteLLMClient
 from autofinetune.orchestrator.loop import run_experiment
 from autofinetune.store.run_store import RunStore
 from autofinetune.trainer.base import get_trainer
+from autofinetune.trainer.resolve import finalize_trainer_backend
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -101,6 +102,7 @@ def run(
     if runs_dir:
         cfg.runs_dir = runs_dir
     _apply_trainer_override(cfg, trainer)
+    cfg.trainer.backend = finalize_trainer_backend(cfg.trainer.backend)
 
     store = RunStore(cfg.runs_dir)
     rec = store.create(input_dir=input_dir)
@@ -141,6 +143,12 @@ def resume(
     overridden = _apply_trainer_override(cfg, trainer)
     if not overridden and rec.trainer_backend:
         cfg.trainer.backend = rec.trainer_backend
+    cfg.trainer.backend = finalize_trainer_backend(
+        cfg.trainer.backend,
+        stored=rec.trainer_backend,
+        overridden=overridden,
+        is_resume=True,
+    )
     if overridden:
         store.set_trainer_backend(run_id, cfg.trainer.backend)
     final = run_experiment(

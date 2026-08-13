@@ -242,6 +242,7 @@ def test_round_error_continues_fatal_fails(tmp_path: Path):
     store2 = RunStore(tmp_path / "runs2")
     rec2 = store2.create(input_dir=inp)
     cfg2 = load_config(None)
+    cfg2.trainer.backend = "fake"
     cfg2.budgets.max_rounds = 1
     cfg2.runs_dir = tmp_path / "runs2"
 
